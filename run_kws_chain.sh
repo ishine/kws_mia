@@ -21,9 +21,8 @@ kws_lang=data/lang
 kws_word=你好米雅
 kws_phone="n i3 h ao3 m i3 ii ia3"
 
-stage=14
+stage=0
 
-# if false we will not train aishell model,
 do_train_aishell1=$false
 
 . ./cmd.sh
@@ -35,33 +34,13 @@ if [ $stage -le 0 ]; then
 		local/download_and_untar.sh $data_aishell $data_url data_aishell.tgz || exit 1;
 		local/download_and_untar.sh $data_aishell $data_url resource_aishell.tgz || exit 1;
 	fi
-	# local/download_and_untar.sh $data_kws $kws_url dev.tar.gz || exit 1;
-	# local/download_and_untar.sh $data_kws $kws_url test.tar.gz || exit 1;
-	# local/download_and_untar.sh $data_kws $kws_url train.tar.gz ||exit 1;
+	local/download_and_untar.sh $data_kws $kws_url dev.tar.gz || exit 1;
+	local/download_and_untar.sh $data_kws $kws_url test.tar.gz || exit 1;
+	local/download_and_untar.sh $data_kws $kws_url train.tar.gz ||exit 1;
 	# You should write your own path to this script
 	local/prepare_kws.sh || exit 1;
 fi
 
-if [ $stage -le 1 ]; then
-	if [ $do_train_aishell1 ];then
-		# Lexicon Preparation,
-		local/aishell_prepare_dict.sh data/aishell/local || exit 1;
-
-		# Data Preparation,
-		local/aishell_data_prep.sh $data/wav $data/transcript || exit 1;
-
-		# Phone Sets, questions, L compilation
-		utils/prepare_lang.sh --position-dependent-phones false $data_aishell/local/dict \
-			"<SPOKEN_NOISE>" $data_aishell/local/lang $data_aishell/lang || exit 1;
-
-		# LM training
-		local/aishell_train_lms.sh || exit 1;
-
-		# G compilation, check LG composition
-		utils/format_lm.sh $data_aishell/lang $data_aishell/local/lm/3gram-mincount/lm_unpruned.gz \
-			$data_aishell/local/dict/lexicon.txt $data_aishell/lang_test || exit 1;
-	fi
-fi
 
 # Prepare mfcc for aishell and kws
 if [ $stage -le 2 ];then
@@ -78,39 +57,8 @@ if [ $stage -le 2 ];then
 	done
 fi
 
-if [ $do_train_aishell1 ];then
-
 if [ $stage -le 3 ];then
-	steps/train_mono.sh --cmd "$train_cmd" --nj 10 \
-		$data_aishell/train $data_aishell/lang exp/mono || exit 1;
-	steps/align_si.sh --cmd "$train_cmd" --nj 10 \
-		$data_aishell/train $data_aishell/lang exp/mono exp/mono_ali || exit 1;
-fi
-
-if [ $stage -le 4 ];then
-	steps/train_deltas.sh --cmd "$train_cmd" \
-		2500 20000 $data_aishell/train $data_aishell/lang exp/mono_ali exp/tri1 || exit 1;
-	steps/align_si.sh --cmd "$train_cmd" --nj 10 \
-		$data_aishell/train $data_aishell/lang exp/tri1 exp/tri1_ali || exit 1;
-fi
-
-if [ $stage -le 5 ];then
-	steps/train_deltas.sh --cmd "$train_cmd" \
-		2500 20000 $data_aishell/train $data_aishell/lang exp/tri1_ali exp/tri2 || exit 1;
-	steps/align_si.sh --cmd "$train_cmd" --nj 10 \
-		$data_aishell/train $data_aishell/lang exp/tri2 exp/tri2_ali || exit 1;
-fi
-
-if [ $stage -le 6 ];then
-	steps/train_lda_mllt.sh --cmd "$train_cmd" \
-		2500 20000 $data_aishell/train $data_aishell/lang exp/tri2_ali exp/tri3a || exit 1;
-fi
-
-fi
-
-if [ $stage -le 7 ];then
-# use aishell tri3a align kws data
-	echo "stage 7"
+	echo "stage 3"
 	for i in train dev test;do
 		awk '{print $1,"'$kws_word'"}' $data_kws/$i/wav.scp > $data_kws/$i/text
 		# paste -d " " < awk '{print $1}' $data_kws/$i/wav.scp < echo $kws_word > $data_kws/$i/text 
@@ -139,7 +87,7 @@ if [ $stage -le 7 ];then
 		
 fi
 
-if [ $stage -le 8 ];then
+if [ $stage -le 4 ];then
 	cat <<EOF > $data_local_dict/lexicon.txt
 SIL sil
 <GBG> sil
@@ -174,28 +122,28 @@ EOF
 		$data_local_dict/lexicon.txt data/lang_test
 fi
 
-if [ $stage -le 9 ];then
+if [ $stage -le 5 ];then
 	steps/train_mono.sh --cmd "$train_cmd" --nj 50 \
         $data_train $kws_lang exp/mono || exit 1;
 fi
 
 # align
-if [ $stage -le 10 ];then
+if [ $stage -le 6 ];then
     steps/align_si.sh --cmd "$feature_cmd" --nj 40 \
         data/merge/train $kws_lang exp/mono exp/mono_ali || exit 1 ;
 fi
 
 # make graph
-if [ $stage -le 11 ];then
+if [ $stage -le 7 ];then
 	utils/mkgraph.sh data/lang_test exp/mono exp/mono/graph || exit 1;
 fi
 
 # alignment lattices
-if [ $stage -le 12 ];then
+if [ $stage -le 8 ];then
 	steps/align_fmllr_lats.sh --stage 0 --nj 40 --cmd "queue.pl -q all.q"\
        data/merge/train  data/lang exp/mono exp/datakws_mia_lats
 fi
-if [ $stage -le 13 ];then
+if [ $stage -le 9 ];then
 	echo "Extracting feats & Create tr cv set"
     [ ! -d $feat_dir ] && mkdir -p $feat_dir
 	mkdir -p $feat_dir/train
@@ -215,7 +163,7 @@ if [ $stage -le 13 ];then
 
 fi
 # train chain model
-if [ $stage -le 14 ];then
+if [ $stage -le 10 ];then
 	local/chain/run_tdnn.sh 
 fi
 exit 1;
